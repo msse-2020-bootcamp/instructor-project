@@ -6,28 +6,27 @@ import os
 import random
 import math
 
+import numpy as np
+
 import matplotlib.pyplot as plt
 
 def calculate_LJ(r_ij):
     """
-    The LJ interaction energy between two particles.
-    
-    Computes the pairwise Lennard Jones interaction energy based on the separation distance in reduced units.
+    Calculate the Lennard Jones energy based on a separation distance.
     
     Parameters
     ----------
     r_ij : float
-        The distance between the particles in reduced units.
+        The distance between the two particles.
         
     Returns
     -------
     pairwise_energy : float
-        The pairwise Lennard Jones interaction energy in reduced units.
-
+        The Lennard Jones potential energy.
     """
     
-    r6_term = math.pow(1/r_ij, 6)
-    r12_term = math.pow(r6_term, 2)
+    r6_term = np.power(1/r_ij, 6)
+    r12_term = np.power(r6_term, 2)
     
     pairwise_energy = 4 * (r12_term - r6_term)
     
@@ -58,7 +57,7 @@ def generate_random_coordinates(num_atoms, density):
     for i in range(num_atoms):
         x_val = random.uniform(0, box_length)
         y_val = random.uniform(0, box_length)
-        z_val = random.uniform(0, box_length)
+        z_val = random.uniform(0, box_legnth)
         coordinates.append([x_val, y_val, z_val])
     
     return coordinates, box_length
@@ -66,29 +65,32 @@ def generate_random_coordinates(num_atoms, density):
 def calculate_distance(coord1, coord2, box_length=None):
     """
     Calculate the distance between two 3D coordinates.
-    
     Parameters
     ----------
-    coord1, coord2: list
+    coord1, coord2: np.ndarray
         The atomic coordinates
-    
+    box_length : float
+        The box length to be used for minimum image distance.
+
     Returns
     -------
     distance: float
         The distance between the two points.
     """
-    
-    distance = 0
-    for i in range(3):
-        dim_dist = (coord1[i] - coord2[i]) 
-        
-        if box_length:
-            dim_dist = dim_dist - box_length * round(dim_dist / box_length)
-        
-        dim_dist = dim_dist**2
-        distance += dim_dist
-    
-    distance = math.sqrt(distance)
+    coord_dist = coord1 - coord2
+
+    if box_length:
+        coord_dist = coord_dist - box_length * np.round(coord_dist / box_length)
+
+    if coord_dist.ndim < 2:
+        coord_dist = coord_dist.reshape(1, -1)
+
+    coord_dist = coord_dist ** 2
+
+    coord_dist_sum = coord_dist.sum(axis=1)
+
+    distance = np.sqrt(coord_dist_sum)
+
     return distance
 
 def calculate_tail_correction(num_particles, box_length, cutoff):
@@ -103,35 +105,18 @@ def calculate_tail_correction(num_particles, box_length, cutoff):
 
 def calculate_total_energy(coordinates, box_length, cutoff):
     """
-    Calculate the total Lennard Jones energy of a system of particles.
-    
-    Parameters
-    ----------
-    coordinates : list
-        Nested list containing particle coordinates.
-    
-    Returns
-    -------
-    total_energy : float
-        The total pairwise Lennard Jones energy of the system of particles.
+    Numpy version - rewrite (calculate_total_energy)
     """
     
     total_energy = 0
-    
     num_atoms = len(coordinates)
-    
+
     for i in range(num_atoms):
-        for j in range(i+1, num_atoms):
-            
-            #print(f'Comparings atom number {i} with atom number {j}')
-            
-            dist_ij = calculate_distance(coordinates[i], coordinates[j], box_length=box_length)
-            
-            if dist_ij < cutoff:
-                interaction_energy = calculate_LJ(dist_ij)
-                total_energy += interaction_energy
-            
+        calc_coords = coordinates[i:]
+        total_energy += calculate_pair_energy(calc_coords, 0, box_length, cutoff)
+    
     return total_energy
+
 
 def read_xyz(filepath):
     """
@@ -189,45 +174,39 @@ def accept_or_reject(delta_e, beta):
 
 def calculate_pair_energy(coordinates, i_particle, box_length, cutoff):
     """
-    Calculate the interaction energy of a particle with its environment (all other particles in the system)
-    
+    Calculate the interaction energy of a particle with its environment (all other particles in the system) - rewrite
     
     Parameters
     ----------
     coordinates : list
-        The coordinates for all the particles in the system.
+        The coordinates for all particles in the system
         
     i_particle : int
-        The particle index for which to calculate the energy.
-    
-    box_length : float
-        The length of the simulation box.
-    
+        The particle number for which to calculate the energy
+        
     cutoff : float
-        The simulation cutoff. Beyond this distance, interactions are not calculated
+        The simulation cutoff. Beyond this distance, interactions are not calculated.
     
     Returns
     -------
-    e_total : float
-        The pairwise interaction energy of the i-th particle with all other particles in the system.
-    
+    e_total : float 
+        The pairwise interaction energy of he i_th particle with all other particles in the system.
     """
     
-    e_total = 0
-    
+    e_total = 0.0
     i_position = coordinates[i_particle]
     
-    num_atoms = len(coordinates)
+    distance_array = calculate_distance(coordinates, i_position, box_length)
     
-    for j_particle in range(num_atoms):
-        if i_particle != j_particle:
-            j_position = coordinates[j_particle]
-            rij = calculate_distance(i_position, j_position, box_length)
+    # Just so we don't use it for calculation
+    distance_array[i_particle] = cutoff*2
+    
+    less_than_cutoff = distance_array[distance_array < cutoff]
+    
+    interaction_energies = calculate_LJ(less_than_cutoff)
+ 
+    e_total = np.sum(interaction_energies)
 
-            if rij < cutoff:
-                e_pair = calculate_LJ(rij)
-                e_total += e_pair
-    
     return e_total
 
 def run_simulation(coordinates, box_length, cutoff, reduced_temperature, num_steps,max_displacement=0.1, freq=1000):
